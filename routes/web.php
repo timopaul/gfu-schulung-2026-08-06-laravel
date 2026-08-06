@@ -33,3 +33,4 @@ Route::middleware('web.tenant')->group(function () {
 */
 Route::get('uebung/1', [ExerciseWebController::class, 'dtoRefactoring'])->name('exercises.dto');
 Route::get('uebung/2', [ExerciseWebController::class, 'serviceExtraction'])->name('exercises.service');
+Route::get('uebung/3', [ExerciseWebController::class, 'actionExtraction'])->name('exercises.action');

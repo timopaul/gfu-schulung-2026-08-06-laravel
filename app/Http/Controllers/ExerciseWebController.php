@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers;
 
 use App\Exercises\CustomerRegistrar;
+use App\Exercises\OrderFinalizer;
 use App\Exercises\OrderProcessor;
 use Illuminate\View\View;
 use ReflectionClass;
@@ -47,6 +48,9 @@ final class ExerciseWebController
         ['name' => 'Kaffee', 'price' => 4.50, 'qty' => 2],
         ['name' => 'Kuchen', 'price' => 3.20, 'qty' => 1],
     ];
+
+    /** Ziel-Action für Übung 3. */
+    private const ACTION = 'App\\Actions\\Orders\\FinalizeOrderAction';
 
     public function dtoRefactoring(): View
     {
@@ -192,6 +196,152 @@ final class ExerciseWebController
         $ctor = (new ReflectionClass(OrderProcessor::class))->getConstructor();
         if ($ctor === null) {
             return 'OrderProcessor hat (noch) keinen Konstruktor';
+        }
+
+        $parts = [];
+        foreach ($ctor->getParameters() as $p) {
+            $type = $p->getType() !== null ? (string) $p->getType().' ' : '';
+            $parts[] = $type.'$'.$p->getName();
+        }
+
+        return '__construct('.implode(', ', $parts).')';
+    }
+
+    public function actionExtraction(): View
+    {
+        $checks = $this->buildActionChecks();
+        [$demo, $demoError] = $this->runFinalizeDemo();
+
+        // Verhalten muss erhalten bleiben: Status "confirmed", Nummer vergeben.
+        $demoOk = $demo !== null
+            && ($demo['status'] ?? null) === 'confirmed'
+            && str_starts_with((string) ($demo['order'] ?? ''), 'ORD-');
+
+        $checks[] = [
+            'label' => 'finalize() liefert weiterhin dasselbe Ergebnis (Status "confirmed", Nummer "ORD-…")',
+            'ok' => $demoOk,
+        ];
+
+        $allPassed = collect($checks)->every(fn (array $c): bool => $c['ok'] === true);
+
+        return view('exercises.action', [
+            'checks' => $checks,
+            'demo' => $demo,
+            'demoError' => $demoError,
+            'allPassed' => $allPassed,
+            'constructor' => $this->currentFinalizerConstructor(),
+        ]);
+    }
+
+    /** @return array<int, array{label: string, ok: bool}> */
+    private function buildActionChecks(): array
+    {
+        $checks = [];
+
+        $exists = class_exists(self::ACTION);
+        $checks[] = ['label' => 'Action "app/Actions/Orders/FinalizeOrderAction.php" existiert', 'ok' => $exists];
+
+        $onePublic = false;
+        $hasExecute = false;
+        $signatureOk = false;
+        $usesTransaction = false;
+
+        if ($exists) {
+            $rc = new ReflectionClass(self::ACTION);
+
+            // Eine Action kapselt EINEN Use-Case: genau eine öffentliche Methode.
+            $public = array_filter(
+                $rc->getMethods(ReflectionMethod::IS_PUBLIC),
+                fn (ReflectionMethod $m): bool => ! $m->isConstructor() && $m->getDeclaringClass()->getName() === self::ACTION,
+            );
+            $onePublic = count($public) === 1;
+
+            if ($rc->hasMethod('execute')) {
+                $hasExecute = true;
+                $rm = $rc->getMethod('execute');
+
+                $rt = $rm->getReturnType();
+                $params = $rm->getParameters();
+                $signatureOk = $rt !== null && ltrim((string) $rt, '?') === 'string'
+                    && count($params) === 1
+                    && $params[0]->getType() !== null && ltrim((string) $params[0]->getType(), '?') === 'string';
+
+                $usesTransaction = str_contains($this->methodSource($rm), 'DB::transaction');
+            }
+        }
+
+        $checks[] = ['label' => 'Genau eine öffentliche Methode (ein Use-Case)', 'ok' => $onePublic];
+        $checks[] = ['label' => 'Methode execute() existiert', 'ok' => $hasExecute];
+        $checks[] = ['label' => 'Signatur execute(string $email): string', 'ok' => $signatureOk];
+        $checks[] = ['label' => 'execute() klammert die Schritte in DB::transaction()', 'ok' => $usesTransaction];
+
+        // Dependency Injection: OrderFinalizer bekommt die Action per Konstruktor.
+        $injected = false;
+        $ctor = (new ReflectionClass(OrderFinalizer::class))->getConstructor();
+        if ($ctor !== null) {
+            foreach ($ctor->getParameters() as $p) {
+                $t = $p->getType();
+                if ($t !== null && ltrim((string) $t, '?') === self::ACTION) {
+                    $injected = true;
+                    break;
+                }
+            }
+        }
+        $checks[] = ['label' => 'OrderFinalizer bekommt FinalizeOrderAction per Konstruktor (DI)', 'ok' => $injected];
+
+        return $checks;
+    }
+
+    /**
+     * Löst OrderFinalizer über den Container auf und liest die zuletzt geloggte Zeile.
+     *
+     * @return array{0: ?array<string, mixed>, 1: ?string}
+     */
+    private function runFinalizeDemo(): array
+    {
+        try {
+            app(OrderFinalizer::class)->finalize('kunde@example.test');
+        } catch (Throwable $e) {
+            return [null, $e->getMessage()];
+        }
+
+        $logFile = storage_path('logs/laravel.log');
+        if (! is_readable($logFile)) {
+            return [null, null];
+        }
+
+        $lines = array_reverse(file($logFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: []);
+        foreach ($lines as $line) {
+            if (str_contains($line, '[Übung] Bestellung abgeschlossen') && preg_match('/(\{.*\})\s*$/', $line, $m)) {
+                $json = json_decode($m[1], true);
+
+                return [is_array($json) ? $json : null, null];
+            }
+        }
+
+        return [null, null];
+    }
+
+    /** Liest den Quelltext einer Methode (für den DB::transaction-Check). */
+    private function methodSource(ReflectionMethod $rm): string
+    {
+        $file = $rm->getFileName();
+        if ($file === false || ! is_readable($file)) {
+            return '';
+        }
+
+        $lines = file($file) ?: [];
+        $slice = array_slice($lines, $rm->getStartLine() - 1, $rm->getEndLine() - $rm->getStartLine() + 1);
+
+        return implode('', $slice);
+    }
+
+    /** Baut die aktuelle Konstruktor-Signatur von OrderFinalizer als lesbaren String. */
+    private function currentFinalizerConstructor(): string
+    {
+        $ctor = (new ReflectionClass(OrderFinalizer::class))->getConstructor();
+        if ($ctor === null) {
+            return 'OrderFinalizer hat (noch) keinen Konstruktor';
         }
 
         $parts = [];

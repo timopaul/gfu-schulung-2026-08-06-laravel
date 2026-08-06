@@ -221,6 +221,11 @@ Die Seite prüft deinen Code live per Reflection (DTO vorhanden? final + readonl
 
 Auch diese Übung läuft **komplett im Browser** (ohne DB/Seeding): `http://localhost:8000/uebung/2` (oder Tab „Übung 2: Service"). Der Runner prüft per Reflection, ob der Service existiert, `total()` korrekt rechnet (9,00 + 3,20, 10 % Rabatt = 10,98) und ob der Service per Konstruktor injiziert wird.
 
+*Aufwärmübung „Mach daraus eine Single Action":* In `app/Exercises/OrderFinalizer.php` erledigt `finalize()` mehrere Schritte inline und ungeklammert – genau ein Use-Case, der atomar laufen sollte. Zieh die Schritte in `app/Actions/Orders/FinalizeOrderAction.php` mit `execute(string $email): string`, klammere sie in `DB::transaction()` und häng die Action per **Konstruktor** in den `OrderFinalizer` (der nur noch delegiert). Vorbild ist `CreateOrderAction` – dieselbe Form, nur kleiner.
+→ `app/Exercises/OrderFinalizer.php`, neu: `app/Actions/Orders/FinalizeOrderAction.php`
+
+Browser-Runner: `http://localhost:8000/uebung/3` (oder Tab „Übung 3: Action"). Prüft, ob die Action existiert, genau **eine** öffentliche Methode `execute(string): string` hat, in `DB::transaction()` klammert und per DI eingehängt ist. Diese Übung nutzt die DB – einmalig `php artisan migrate` ausführen.
+
 **Block 2 – Action Classes & Events.**
 Verlagere die Logik aus `OrderController@store` in `CreateOrderAction`. Klammere alles in `DB::transaction()`. Feuere `OrderCreated` statt die Mail direkt zu senden. Der Controller bleibt „lean".
 → `app/Actions/Orders/CreateOrderAction.php`, `app/Events/OrderCreated.php`, `app/Listeners/SendOrderConfirmation.php`

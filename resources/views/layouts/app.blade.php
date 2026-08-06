@@ -77,6 +77,7 @@
         <nav class="tabs">
             <a href="{{ route('orders.index') }}" class="{{ request()->routeIs('orders.index') ? 'active' : '' }}">Bestellungen</a>
             <a href="{{ route('orders.create') }}" class="{{ request()->routeIs('orders.create') ? 'active' : '' }}">Neue Bestellung</a>
+            <a href="{{ route('exercises.dto') }}" class="{{ request()->routeIs('exercises.dto') ? 'active' : '' }}">Übung 1: DTO</a>
         </nav>
 
         @if (session('status'))

@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Http\Controllers\ExerciseWebController;
 use App\Http\Controllers\OrderWebController;
 use Illuminate\Support\Facades\Route;
 
@@ -24,3 +25,10 @@ Route::middleware('web.tenant')->group(function () {
 
     Route::post('tenant/switch', [OrderWebController::class, 'switchTenant'])->name('tenant.switch');
 });
+
+/*
+| Übungs-Runner (Tag 1, Block 1). BEWUSST ohne 'web.tenant': die DTO-Übung
+| braucht weder Datenbank noch Mandant und läuft direkt nach dem Clonen.
+| Die Seite prüft den Code per Reflection – refactoren, neu laden, grün werden.
+*/
+Route::get('uebung/1', [ExerciseWebController::class, 'dtoRefactoring'])->name('exercises.dto');

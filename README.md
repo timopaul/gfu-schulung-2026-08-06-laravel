@@ -207,6 +207,15 @@ Ausgangslage: ein Controller, der mit `$request->all()` arbeitet. Ziel: `CreateO
 *Aufwärmübung „Töte den Parameter-Wust":* In `app/Exercises/CustomerRegistrar.php` liegt eine Methode mit sechs losen Parametern (ein „Data Clump") und ein Aufruf, in dem zwei Argumente vertauscht sind – vom Compiler unbemerkt. Refaktoriere die Signatur auf ein einziges `RegisterCustomerData`-DTO (`final readonly class`) und schreibe den Aufruf mit Named Arguments neu. Der Bug wird damit unmöglich. Verifizieren: `php artisan tinker` → `(new App\Exercises\CustomerRegistrar())->demoAufrufMitBug();`
 → `app/Exercises/CustomerRegistrar.php`, neu: `app/Data/RegisterCustomerData.php`
 
+Diese Übung lässt sich **komplett im Browser** abarbeiten und testen – ganz ohne DB oder Seeding:
+
+```bash
+php artisan serve
+# -> http://localhost:8000/uebung/1   (oder Tab "Übung 1: DTO")
+```
+
+Die Seite prüft deinen Code live per Reflection (DTO vorhanden? final + readonly? richtige Felder/Typen? Signatur umgestellt?) und führt den Beispielaufruf aus, sodass du siehst, ob die Vertauschung behoben ist. Refactoren → Seite neu laden → alle Häkchen grün.
+
 **Block 2 – Action Classes & Events.**
 Verlagere die Logik aus `OrderController@store` in `CreateOrderAction`. Klammere alles in `DB::transaction()`. Feuere `OrderCreated` statt die Mail direkt zu senden. Der Controller bleibt „lean".
 → `app/Actions/Orders/CreateOrderAction.php`, `app/Events/OrderCreated.php`, `app/Listeners/SendOrderConfirmation.php`

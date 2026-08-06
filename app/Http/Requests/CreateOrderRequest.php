@@ -20,6 +20,32 @@ class CreateOrderRequest extends FormRequest
         return true;
     }
 
+    /**
+     * Normalisiert die Rohdaten VOR der Validierung – vor allem für das
+     * Browser-Formular: HTML sendet leere Felder als "" statt null, und eine
+     * frei gelassene Positionszeile soll nicht als Fehler zählen. Die API
+     * profitiert unverändert mit (JSON schickt i. d. R. bereits sauber).
+     */
+    protected function prepareForValidation(): void
+    {
+        $voucher = $this->input('voucher_code');
+        $items = $this->input('items', []);
+
+        if (is_array($items)) {
+            $items = array_values(array_filter(
+                $items,
+                static fn ($row): bool => is_array($row)
+                    && isset($row['product_id'])
+                    && $row['product_id'] !== '',
+            ));
+        }
+
+        $this->merge([
+            'voucher_code' => $voucher === '' ? null : $voucher,
+            'items' => $items,
+        ]);
+    }
+
     /** @return array<string, mixed> */
     public function rules(): array
     {

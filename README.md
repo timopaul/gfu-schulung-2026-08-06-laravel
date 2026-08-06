@@ -45,6 +45,40 @@ Der lokale Dev-Server:
 php artisan serve
 ```
 
+## Fork mit dem Basis-Repository aktualisieren
+
+Während der Schulung kommen neue Übungen und Fixes ins Basis-Repository (`upstream`). So holst du sie in deinen Fork, ohne deine eigene Arbeit zu verlieren.
+
+**Einmalig:** das Basis-Repository als zweites Remote namens `upstream` eintragen (dein eigener Fork bleibt `origin`).
+
+```bash
+git remote add upstream https://github.com/timopaul/gfu-schulung-2026-08-06-laravel.git
+git remote -v   # Kontrolle: origin = dein Fork, upstream = Basis
+```
+
+**Bei jedem Update:** neue Commits holen und in deinen aktuellen Branch übernehmen.
+
+```bash
+git fetch upstream
+git checkout main
+git merge upstream/main        # bringt die neuen Übungen in deinen main
+```
+
+Arbeitest du auf einem eigenen Übungs-Branch (empfohlen, z. B. `block-1`), rebasest du ihn danach auf den frischen `main`:
+
+```bash
+git checkout block-1
+git rebase main
+```
+
+Deinen aktualisierten Fork auf GitHub schieben:
+
+```bash
+git push origin main
+```
+
+> Merge-Konflikt? Kein Drama: Git markiert die betroffenen Stellen mit `<<<<<<<` / `>>>>>>>`. Behalte deine Lösung oder die aus `upstream`, entferne die Marker, dann `git add <datei>` und `git merge --continue`. Im Zweifel kurz melden – wir schauen gemeinsam drauf.
+
 ## Die API in 30 Sekunden
 
 Alle Routen liegen unter `/api/v1` und verlangen den Header `X-Api-Key`.
@@ -169,6 +203,9 @@ Jede Übung nennt die relevanten Dateien. Empfehlung: pro Block einen eigenen Gi
 **Block 1 – Typsichere DTOs.**
 Ausgangslage: ein Controller, der mit `$request->all()` arbeitet. Ziel: `CreateOrderData::fromRequest($request)` mit `readonly`-Properties (PHP 8.2). Trenne Validierung (`CreateOrderRequest`) sauber von der Domain (`CreateOrderData`). Ergänze die Gutschein-Prüfung in `withValidator()`.
 → `app/Data/*`, `app/Http/Requests/CreateOrderRequest.php`
+
+*Aufwärmübung „Töte den Parameter-Wust":* In `app/Exercises/CustomerRegistrar.php` liegt eine Methode mit sechs losen Parametern (ein „Data Clump") und ein Aufruf, in dem zwei Argumente vertauscht sind – vom Compiler unbemerkt. Refaktoriere die Signatur auf ein einziges `RegisterCustomerData`-DTO (`final readonly class`) und schreibe den Aufruf mit Named Arguments neu. Der Bug wird damit unmöglich. Verifizieren: `php artisan tinker` → `(new App\Exercises\CustomerRegistrar())->demoAufrufMitBug();`
+→ `app/Exercises/CustomerRegistrar.php`, neu: `app/Data/RegisterCustomerData.php`
 
 **Block 2 – Action Classes & Events.**
 Verlagere die Logik aus `OrderController@store` in `CreateOrderAction`. Klammere alles in `DB::transaction()`. Feuere `OrderCreated` statt die Mail direkt zu senden. Der Controller bleibt „lean".

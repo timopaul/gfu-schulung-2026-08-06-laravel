@@ -7,6 +7,8 @@ namespace App\Http\Controllers;
 use App\Exercises\CustomerRegistrar;
 use App\Exercises\OrderFinalizer;
 use App\Exercises\OrderProcessor;
+use App\Exercises\OrderShipper;
+use Illuminate\Support\Facades\Event;
 use Illuminate\View\View;
 use ReflectionClass;
 use ReflectionMethod;
@@ -51,6 +53,11 @@ final class ExerciseWebController
 
     /** Ziel-Action für Übung 3. */
     private const ACTION = 'App\\Actions\\Orders\\FinalizeOrderAction';
+
+    /** Ziel-Event und -Listener für Übung 4. */
+    private const EVENT = 'App\\Events\\OrderShipped';
+    private const LISTENER_MAIL = 'App\\Listeners\\SendShippingConfirmation';
+    private const LISTENER_STOCK = 'App\\Listeners\\UpdateInventory';
 
     public function dtoRefactoring(): View
     {
@@ -351,6 +358,115 @@ final class ExerciseWebController
         }
 
         return '__construct('.implode(', ', $parts).')';
+    }
+
+    public function eventDispatch(): View
+    {
+        // ERST der echte Lauf (löst die registrierten Listener aus), DANN die Checks.
+        [$demo, $demoError] = $this->runShipDemo();
+
+        $checks = $this->buildEventChecks();
+
+        $sideEffectsOk = $demo !== null && ($demo['mail'] ?? false) && ($demo['stock'] ?? false);
+        $checks[] = [
+            'label' => 'Beide Nebeneffekte laufen (Versandbestätigung + Bestand aktualisiert)',
+            'ok' => $sideEffectsOk,
+        ];
+
+        $allPassed = collect($checks)->every(fn (array $c): bool => $c['ok'] === true);
+
+        return view('exercises.event', [
+            'checks' => $checks,
+            'demo' => $demo,
+            'demoError' => $demoError,
+            'allPassed' => $allPassed,
+        ]);
+    }
+
+    /** @return array<int, array{label: string, ok: bool}> */
+    private function buildEventChecks(): array
+    {
+        $checks = [];
+
+        $eventExists = class_exists(self::EVENT);
+        $checks[] = ['label' => 'Event "app/Events/OrderShipped.php" existiert', 'ok' => $eventExists];
+
+        $checks[] = [
+            'label' => 'Listener SendShippingConfirmation mit handle(OrderShipped)',
+            'ok' => $this->listenerHandles(self::LISTENER_MAIL),
+        ];
+        $checks[] = [
+            'label' => 'Listener UpdateInventory mit handle(OrderShipped)',
+            'ok' => $this->listenerHandles(self::LISTENER_STOCK),
+        ];
+
+        // Registrierung im EventServiceProvider ($listen): beide Listener für OrderShipped.
+        $registered = false;
+        if (class_exists('App\\Providers\\EventServiceProvider')) {
+            $listen = (new ReflectionClass('App\\Providers\\EventServiceProvider'))->getDefaultProperties()['listen'] ?? [];
+            $forEvent = is_array($listen) && isset($listen[self::EVENT]) ? (array) $listen[self::EVENT] : [];
+            $registered = in_array(self::LISTENER_MAIL, $forEvent, true) && in_array(self::LISTENER_STOCK, $forEvent, true);
+        }
+        $checks[] = ['label' => 'Beide Listener für OrderShipped registriert (EventServiceProvider)', 'ok' => $registered];
+
+        // Feuert OrderShipper das Event? Unter Event::fake() laufen keine Listener –
+        // wir prüfen nur, DASS dispatcht wird (nicht mehr inline erledigt).
+        $fires = false;
+        if ($eventExists) {
+            Event::fake([self::EVENT]);
+            try {
+                app(OrderShipper::class)->ship('kunde@example.test', 'SKU-42', 3);
+            } catch (Throwable) {
+                // Zwischenstand beim Refactoring – bleibt rot.
+            }
+            $fires = count(Event::dispatched(self::EVENT)) > 0;
+        }
+        $checks[] = ['label' => 'OrderShipper feuert OrderShipped (statt die Nebeneffekte selbst zu erledigen)', 'ok' => $fires];
+
+        return $checks;
+    }
+
+    /** Prüft, ob eine Listener-Klasse handle(OrderShipped) besitzt. */
+    private function listenerHandles(string $listener): bool
+    {
+        if (! class_exists($listener) || ! method_exists($listener, 'handle')) {
+            return false;
+        }
+
+        $params = (new ReflectionMethod($listener, 'handle'))->getParameters();
+
+        return count($params) === 1
+            && $params[0]->getType() !== null
+            && ltrim((string) $params[0]->getType(), '?') === self::EVENT;
+    }
+
+    /**
+     * Führt ship() real aus (löst registrierte Listener aus) und sucht die
+     * beiden Nebeneffekt-Zeilen im Log.
+     *
+     * @return array{0: ?array<string, mixed>, 1: ?string}
+     */
+    private function runShipDemo(): array
+    {
+        try {
+            app(OrderShipper::class)->ship('kunde@example.test', 'SKU-42', 3);
+        } catch (Throwable $e) {
+            return [null, $e->getMessage()];
+        }
+
+        $logFile = storage_path('logs/laravel.log');
+        if (! is_readable($logFile)) {
+            return [null, null];
+        }
+
+        $recent = array_slice(file($logFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [], -12);
+        $joined = implode("\n", $recent);
+
+        return [[
+            'shipped' => str_contains($joined, '[Übung] Bestellung versandt'),
+            'mail' => str_contains($joined, '[Übung] Versandbestätigung'),
+            'stock' => str_contains($joined, '[Übung] Bestand aktualisiert'),
+        ], null];
     }
 
     /** @return array<int, array{label: string, ok: bool}> */

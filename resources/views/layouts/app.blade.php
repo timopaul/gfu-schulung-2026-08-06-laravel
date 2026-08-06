@@ -80,6 +80,7 @@
             <a href="{{ route('exercises.dto') }}" class="{{ request()->routeIs('exercises.dto') ? 'active' : '' }}">Übung 1: DTO</a>
             <a href="{{ route('exercises.service') }}" class="{{ request()->routeIs('exercises.service') ? 'active' : '' }}">Übung 2: Service</a>
             <a href="{{ route('exercises.action') }}" class="{{ request()->routeIs('exercises.action') ? 'active' : '' }}">Übung 3: Action</a>
+            <a href="{{ route('exercises.event') }}" class="{{ request()->routeIs('exercises.event') ? 'active' : '' }}">Übung 4: Event</a>
         </nav>
 
         @if (session('status'))

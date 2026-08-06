@@ -226,6 +226,11 @@ Auch diese Übung läuft **komplett im Browser** (ohne DB/Seeding): `http://loca
 
 Browser-Runner: `http://localhost:8000/uebung/3` (oder Tab „Übung 3: Action"). Prüft, ob die Action existiert, genau **eine** öffentliche Methode `execute(string): string` hat, in `DB::transaction()` klammert und per DI eingehängt ist. Diese Übung nutzt die DB – einmalig `php artisan migrate` ausführen.
 
+*Aufwärmübung „Entkopple die Nebeneffekte über ein Event":* In `app/Exercises/OrderShipper.php` erledigt `ship()` zwei Nebeneffekte selbst und inline – Versandbestätigung (Mail) und Bestandsaktualisierung. Feuere stattdessen ein Event `OrderShipped` und verlagere die zwei Nebeneffekte in je einen Listener (`SendShippingConfirmation`, `UpdateInventory`), registriert im `EventServiceProvider`. `ship()` feuert danach nur noch `OrderShipped::dispatch(...)`. Der Gewinn: einen dritten Listener (z. B. Statistik) hängst du an, ohne `ship()` anzufassen.
+→ `app/Exercises/OrderShipper.php`, neu: `app/Events/OrderShipped.php`, `app/Listeners/SendShippingConfirmation.php`, `app/Listeners/UpdateInventory.php`, Registrierung in `app/Providers/EventServiceProvider.php`
+
+Browser-Runner (ohne DB): `http://localhost:8000/uebung/4` (oder Tab „Übung 4: Event"). Prüft, ob Event und beide Listener existieren, im `EventServiceProvider` registriert sind, `ship()` das Event feuert (via `Event::fake()`) und beide Nebeneffekte tatsächlich laufen.
+
 **Block 2 – Action Classes & Events.**
 Verlagere die Logik aus `OrderController@store` in `CreateOrderAction`. Klammere alles in `DB::transaction()`. Feuere `OrderCreated` statt die Mail direkt zu senden. Der Controller bleibt „lean".
 → `app/Actions/Orders/CreateOrderAction.php`, `app/Events/OrderCreated.php`, `app/Listeners/SendOrderConfirmation.php`

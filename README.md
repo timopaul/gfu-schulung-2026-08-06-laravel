@@ -65,6 +65,48 @@ curl -X POST http://localhost:8000/api/v1/orders \
 
 ---
 
+## Web-Oberfläche (Tag 1)
+
+Damit am **ersten Tag sofort etwas im Browser sichtbar** ist – und die eigene Arbeit direkt getestet werden kann – gibt es zur API ein schlankes Backoffice: eine **Bestell-Liste** plus **Formular zum Anlegen und Bearbeiten**.
+
+```bash
+# einmalig eine Datei-DB anlegen und seeden (die Web-UI braucht eine persistente DB):
+touch database/database.sqlite
+php artisan migrate:fresh --seed
+
+php artisan serve
+# -> http://localhost:8000/orders
+```
+
+| Route | Beschreibung |
+|-------|--------------|
+| `GET  /orders` | Liste der Bestellungen des aktuellen Mandanten |
+| `GET  /orders/create` | Formular „Neue Bestellung" |
+| `POST /orders` | Bestellung anlegen |
+| `GET  /orders/{order}/edit` | Formular „Bestellung bearbeiten" |
+| `PUT  /orders/{order}` | Bestellung ändern |
+| `POST /tenant/switch` | Mandant wechseln (Dropdown oben rechts) |
+
+**Mandant im Browser:** Die API identifiziert den Mandanten über den Header `X-Api-Key`; der Browser hat keinen solchen Header. Deshalb löst die Middleware `ResolveWebTenant` den Mandanten aus der **Session** auf (Umschalter oben rechts). Ab dann ist der Web-Weg für Controller, FormRequest und `OrderService` **nicht mehr vom API-Weg zu unterscheiden**.
+
+### Der „Aha"-Moment: gleiches Event, egal ob Web oder API
+
+Web-Controller und API-Controller sind bewusst **symmetrisch**: je *ein* schlanker Controller, der die Arbeit an den gemeinsamen `OrderService` delegiert. Das Domain-Event feuert damit an **einer** Stelle – unabhängig von der Herkunft der Anfrage. Zum Beweis ein Terminal mitlaufen lassen:
+
+```bash
+tail -f storage/logs/laravel.log | grep Domain-Event
+```
+
+Jetzt einmal im Browser eine Bestellung anlegen **und** einmal per `curl` (siehe oben). In beiden Fällen erscheint dieselbe Zeile:
+
+```
+[Domain-Event] OrderCreated {"order_id":1,"tenant_id":1,"customer":"…","total_eur":238}
+```
+
+Beim Bearbeiten analog `OrderUpdated`. Genau das ist die Kernaussage: **die Oberfläche ist nur Darstellung – die Domäne (und ihr Event) ist die eine Wahrheit.**
+
+---
+
 ## Architektur-Überblick
 
 ```
@@ -74,15 +116,33 @@ app/
 │   └── OrderItemData.php
 ├── Http/
 │   ├── Requests/             Validierung, getrennt von der Domain (Block 1)
-│   ├── Controllers/Api/V1/   Lean Controller (Block 2)
+│   ├── Controllers/
+│   │   ├── Api/V1/           Lean Controller – JSON (Block 2)
+│   │   └── OrderWebController Lean Controller – Blade/Redirect (Web-Erweiterung)
 │   ├── Resources/            Output-Transformation (Block 6)
-│   └── Middleware/           Tenant-Isolation & terminable Logging (Block 5)
+│   └── Middleware/           Tenant-Isolation (API: X-Api-Key, Web: Session)
+├── Services/OrderService     Gemeinsamer Einstieg für Web + API
 ├── Actions/Orders/           Ein Use-Case = eine Klasse (Block 2)
 ├── Pipelines/Checkout/       Sequentielle Geschäftslogik (Block 4)
 ├── Builders/                 Custom Eloquent Builder / Scopes (Block 3)
 ├── Events/ + Listeners/      Entkoppelte Nebeneffekte (Block 2)
 ├── Exceptions/               Fachliche Fehler => RFC 7807 (Block 6)
-bootstrap/app.php             Middleware-Aliase + globaler Exception-Handler (Block 5/6)
+resources/views/orders/       Liste + Formular (ohne Build-Step, Inline-CSS)
+routes/web.php                Browser-Routen (Web-Erweiterung)
+bootstrap/app.php             Middleware-Aliase, Events-Discovery aus, Exception-Handler
+```
+
+Web und API teilen sich Requests, DTO und `OrderService` – der einzige Unterschied ist die Darstellung:
+
+```
+POST /orders (Browser)          POST /api/v1/orders (API)
+        │                                │
+   OrderWebController            Api\V1\OrderController
+        └──────────────┬─────────────────┘
+                 OrderService (place / change)
+                        └─ CreateOrderAction / UpdateOrderAction
+                           └─ DB::transaction → Pipeline → OrderCreated / OrderUpdated
+                              → EIN Listener → EINE Log-Zeile [Domain-Event]
 ```
 
 Der Datenfluss einer Bestellung:

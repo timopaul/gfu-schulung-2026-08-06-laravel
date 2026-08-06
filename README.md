@@ -216,6 +216,11 @@ php artisan serve
 
 Die Seite prüft deinen Code live per Reflection (DTO vorhanden? final + readonly? richtige Felder/Typen? Signatur umgestellt?) und führt den Beispielaufruf aus, sodass du siehst, ob die Vertauschung behoben ist. Refactoren → Seite neu laden → alle Häkchen grün.
 
+*Aufwärmübung „Zieh die Rechenlogik in einen Service":* In `app/Exercises/OrderProcessor.php` rechnet `process()` die Bestellsumme selbst aus – reine Fachlogik, die im „Fat Controller" nichts verloren hat. Extrahiere sie in `app/Services/PricingService.php` mit `total(array $items, float $discountRate): float` und lass den Service per **Konstruktor** in den `OrderProcessor` injizieren (statt `new`). Ergebnis: eine pure, testbare Methode und ein Objekt, das der Container automatisch zusammensteckt.
+→ `app/Exercises/OrderProcessor.php`, neu: `app/Services/PricingService.php`
+
+Auch diese Übung läuft **komplett im Browser** (ohne DB/Seeding): `http://localhost:8000/uebung/2` (oder Tab „Übung 2: Service"). Der Runner prüft per Reflection, ob der Service existiert, `total()` korrekt rechnet (9,00 + 3,20, 10 % Rabatt = 10,98) und ob der Service per Konstruktor injiziert wird.
+
 **Block 2 – Action Classes & Events.**
 Verlagere die Logik aus `OrderController@store` in `CreateOrderAction`. Klammere alles in `DB::transaction()`. Feuere `OrderCreated` statt die Mail direkt zu senden. Der Controller bleibt „lean".
 → `app/Actions/Orders/CreateOrderAction.php`, `app/Events/OrderCreated.php`, `app/Listeners/SendOrderConfirmation.php`

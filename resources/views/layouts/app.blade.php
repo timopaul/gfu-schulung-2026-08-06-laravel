@@ -78,6 +78,7 @@
             <a href="{{ route('orders.index') }}" class="{{ request()->routeIs('orders.index') ? 'active' : '' }}">Bestellungen</a>
             <a href="{{ route('orders.create') }}" class="{{ request()->routeIs('orders.create') ? 'active' : '' }}">Neue Bestellung</a>
             <a href="{{ route('exercises.dto') }}" class="{{ request()->routeIs('exercises.dto') ? 'active' : '' }}">Übung 1: DTO</a>
+            <a href="{{ route('exercises.service') }}" class="{{ request()->routeIs('exercises.service') ? 'active' : '' }}">Übung 2: Service</a>
         </nav>
 
         @if (session('status'))

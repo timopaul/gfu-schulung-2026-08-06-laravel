@@ -32,3 +32,4 @@ Route::middleware('web.tenant')->group(function () {
 | Die Seite prüft den Code per Reflection – refactoren, neu laden, grün werden.
 */
 Route::get('uebung/1', [ExerciseWebController::class, 'dtoRefactoring'])->name('exercises.dto');
+Route::get('uebung/2', [ExerciseWebController::class, 'serviceExtraction'])->name('exercises.service');

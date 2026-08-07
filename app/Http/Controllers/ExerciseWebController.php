@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers;
 
+use App\Data\CreateOrderData;
 use App\Exercises\CustomerRegistrar;
 use App\Exercises\OrderFinalizer;
 use App\Exercises\OrderProcessor;
@@ -12,6 +13,7 @@ use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Product;
 use App\Models\Tenant;
+use App\Pipelines\Checkout\CheckoutContext;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\View\View;
@@ -66,6 +68,12 @@ final class ExerciseWebController
 
     /** Ziel-Klasse für Übung 5 (Advanced Eloquent / N+1). */
     private const REPORT = 'App\\Exercises\\OrderReport';
+
+    /** Ziel-Klassen für Übung 6 (Advanced Pipelines). */
+    private const PIPE = 'App\\Pipelines\\Checkout\\MinimumOrderValuePipe';
+    private const MIN_EXC = 'App\\Exceptions\\BelowMinimumOrderException';
+    private const DOMAIN_EXC = 'App\\Exceptions\\DomainException';
+    private const CREATE_ACTION = 'App\\Actions\\Orders\\CreateOrderAction';
 
     public function dtoRefactoring(): View
     {
@@ -620,6 +628,122 @@ final class ExerciseWebController
                 'quantity' => 1,
                 'unit_price_cents' => 1000,
             ]);
+        }
+    }
+
+    /**
+     * Übung 6 – Advanced Pipelines: ein neuer Pipe im Checkout.
+     *
+     * Der MinimumOrderValuePipe soll einen Mindestbestellwert erzwingen und bei
+     * Unterschreitung eine BelowMinimumOrderException werfen – die der globale
+     * Handler zu RFC-7807-JSON macht. Zusätzlich muss der Pipe an der richtigen
+     * STELLE in die Pipeline: nach CheckStockPipe, weil dort subtotalCents entsteht.
+     */
+    public function checkoutPipeline(): View
+    {
+        $checks = $this->buildPipelineChecks();
+        [$demo, $demoError] = $this->runPipeDemo();
+
+        $throwsOk = $demo !== null && ($demo['throwsBelow'] ?? false) === true;
+        $passesOk = $demo !== null && ($demo['passesAbove'] ?? false) === true;
+
+        $checks[] = ['label' => 'Pipe wirft BelowMinimumOrderException bei 3,00 € (unter dem Mindestwert)', 'ok' => $throwsOk];
+        $checks[] = ['label' => 'Pipe lässt 20,00 € unverändert durch (return $next)', 'ok' => $passesOk];
+
+        $allPassed = collect($checks)->every(fn (array $c): bool => $c['ok'] === true);
+
+        return view('exercises.pipeline', [
+            'checks' => $checks,
+            'demo' => $demo,
+            'demoError' => $demoError,
+            'allPassed' => $allPassed,
+        ]);
+    }
+
+    /** @return array<int, array{label: string, ok: bool}> */
+    private function buildPipelineChecks(): array
+    {
+        $checks = [];
+
+        $pipeExists = class_exists(self::PIPE);
+        $checks[] = ['label' => 'Pipe "app/Pipelines/Checkout/MinimumOrderValuePipe.php" existiert', 'ok' => $pipeExists];
+
+        // Fachlicher Fehler: erbt DomainException, richtiger Status + Titel.
+        $excOk = false;
+        if (class_exists(self::MIN_EXC)) {
+            $rc = new ReflectionClass(self::MIN_EXC);
+            $defaults = $rc->getDefaultProperties();
+            $excOk = $rc->isSubclassOf(self::DOMAIN_EXC)
+                && ($defaults['status'] ?? null) === 422
+                && ($defaults['title'] ?? null) === 'Below Minimum Order';
+        }
+        $checks[] = ['label' => 'BelowMinimumOrderException: erbt DomainException, status 422, title "Below Minimum Order"', 'ok' => $excOk];
+
+        // Quelltext von handle(): wirft die Exception (statt still durchzulassen).
+        $pipeSrc = '';
+        if ($pipeExists && method_exists(self::PIPE, 'handle')) {
+            $pipeSrc = $this->methodSource(new ReflectionMethod(self::PIPE, 'handle'));
+        }
+        $throwsInSource = str_contains($pipeSrc, 'throw') && str_contains($pipeSrc, 'BelowMinimumOrderException');
+        $checks[] = ['label' => 'handle() wirft die Exception (statt sie nur zu erwähnen)', 'ok' => $throwsInSource];
+
+        // Verdrahtung: Pipe in der Pipeline von CreateOrderAction, NACH CheckStockPipe.
+        $wired = false;
+        $orderOk = false;
+        if (class_exists(self::CREATE_ACTION) && method_exists(self::CREATE_ACTION, 'execute')) {
+            $actionSrc = $this->methodSource(new ReflectionMethod(self::CREATE_ACTION, 'execute'));
+            $wired = str_contains($actionSrc, 'MinimumOrderValuePipe');
+            $posCheck = strpos($actionSrc, 'CheckStockPipe');
+            $posMin = strpos($actionSrc, 'MinimumOrderValuePipe');
+            $orderOk = $wired && $posCheck !== false && $posMin !== false && $posMin > $posCheck;
+        }
+        $checks[] = ['label' => 'Pipe in CreateOrderAction in die Pipeline (through([...])) eingehängt', 'ok' => $wired];
+        $checks[] = ['label' => 'Pipe läuft NACH CheckStockPipe (Reihenfolge = subtotal muss stehen)', 'ok' => $orderOk];
+
+        return $checks;
+    }
+
+    /**
+     * Testet den Pipe isoliert – ohne DB: ein Kontext mit gesetzter subtotal
+     * wird mit einem Durchreich-$next durch handle() geschickt. Einmal unter,
+     * einmal über dem Mindestwert.
+     *
+     * @return array{0: ?array<string, mixed>, 1: ?string}
+     */
+    private function runPipeDemo(): array
+    {
+        if (! class_exists(self::PIPE)) {
+            return [null, null];
+        }
+
+        try {
+            $pipe = app(self::PIPE);
+            $passthrough = static fn (CheckoutContext $c): CheckoutContext => $c;
+
+            // 3,00 € -> soll BelowMinimumOrderException werfen.
+            $throwsBelow = false;
+            $low = new CheckoutContext(new CreateOrderData(1, 'grader@example.test', []));
+            $low->subtotalCents = 300;
+            try {
+                $pipe->handle($low, $passthrough);
+            } catch (Throwable $e) {
+                $throwsBelow = is_a($e, self::MIN_EXC);
+            }
+
+            // 20,00 € -> soll unverändert durchgereicht werden.
+            $passesAbove = false;
+            $high = new CheckoutContext(new CreateOrderData(1, 'grader@example.test', []));
+            $high->subtotalCents = 2000;
+            try {
+                $result = $pipe->handle($high, $passthrough);
+                $passesAbove = $result instanceof CheckoutContext && $result->subtotalCents === 2000;
+            } catch (Throwable) {
+                $passesAbove = false;
+            }
+
+            return [['throwsBelow' => $throwsBelow, 'passesAbove' => $passesAbove], null];
+        } catch (Throwable $e) {
+            return [null, $e->getMessage()];
         }
     }
 

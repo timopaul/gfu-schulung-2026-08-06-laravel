@@ -232,6 +232,9 @@ app(App\Exercises\OrderReport::class)->summarize(1);
 count(DB::getQueryLog());   // vorher: 1 + N,  Ziel: 1
 ```
 
+**Übung 6 – Advanced Pipelines (Mindestbestellwert).** Der Skeleton-Pipe `app/Pipelines/Checkout/MinimumOrderValuePipe.php` lässt aktuell jede Bestellung durch. Erzwinge einen Mindestbestellwert von **5,00 €** (500 Cent) auf `subtotalCents`: lege `app/Exceptions/BelowMinimumOrderException.php` an (erbt `DomainException`, `status = 422`, `title = 'Below Minimum Order'`, Vorbild: `InvalidVoucherException`), lass `handle()` bei Unterschreitung werfen und häng den Pipe in `CreateOrderAction::execute()` in das `through([...])` – **nach** `CheckStockPipe`, weil dort erst `subtotalCents` entsteht. Der globale Exception-Handler macht daraus automatisch RFC-7807-JSON. Kernbotschaft: **die Position im `through([...])` ist die Geschäftslogik.**
+→ ändern: `app/Pipelines/Checkout/MinimumOrderValuePipe.php`, `app/Actions/Orders/CreateOrderAction.php` · neu: `app/Exceptions/BelowMinimumOrderException.php` · Runner: `/uebung/6` · ohne DB (Pipe isoliert getestet)
+
 **Block 5 – Custom Middleware.**
 Implementiere `EnsureTenantAccess` (Tenant-Isolation über `X-Api-Key`) und `LogApiUsage` als **terminable** Middleware (`terminate()` läuft nach dem Response). Registriere die Aliase in `bootstrap/app.php`.
 → `app/Http/Middleware/*`, `bootstrap/app.php`

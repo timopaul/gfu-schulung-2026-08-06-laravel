@@ -39,3 +39,6 @@ Route::get('uebung/4', [ExerciseWebController::class, 'eventDispatch'])->name('e
 // Übung 5 (Tag 2) braucht die DB: der Runner misst den Query-Count an temporären
 // Testdaten und rollt sie danach zurück. Vorher einmal 'php artisan migrate'.
 Route::get('uebung/5', [ExerciseWebController::class, 'eloquentQueryOptimization'])->name('exercises.eloquent');
+
+// Übung 6 (Tag 2) – Advanced Pipelines. Der Pipe wird isoliert getestet (ohne DB).
+Route::get('uebung/6', [ExerciseWebController::class, 'checkoutPipeline'])->name('exercises.pipeline');

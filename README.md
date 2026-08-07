@@ -247,6 +247,14 @@ curl -s http://localhost:8000/api/v1/products \
 # kein tenant_id, keine rohen *_cents.
 ```
 
+**Übung 8 – Testen mit Pest.** Anders als 1–7 ist hier Pest selbst der Grader: rot → grün, ohne Kontrollseite. `tests/Feature/CheckoutPestTest.php` enthält eine fertige, grüne Vorlage plus eine `->todo()`-Checkliste. Bau jeden Todo zu einem echten Test aus (`->todo()` entfernen, Closure ergänzen): Exception + Rollback (`->toThrow()`, `Event::assertNotDispatched`), ein **Dataset** (`->with([...])`) für die Steuerberechnung, ein Event-Fake (`Event::assertDispatchedTimes`), ein HTTP-Feature-Test (`postJson` + `assertJsonPath`), der 401-Negativfall und drei **Architektur-Tests** (`arch()` → `toBeReadonly`, `toBeFinal`, `toBeUsed`). Alles gegen die Basis-Domäne (`CreateOrderAction`, `/api/v1/orders`) – unabhängig von den übrigen Übungen. Kernbotschaft: **eine Rechenregel, viele Fälle – und Konventionen als ausführbare Regel.**
+→ ändern: `tests/Feature/CheckoutPestTest.php` · Grader: Pest selbst
+
+```bash
+php artisan test tests/Feature/CheckoutPestTest.php   # Vorlage grün, Todos offen
+./vendor/bin/pest --todos                             # offene Checkliste anzeigen
+```
+
 **Block 5 – Custom Middleware.**
 Implementiere `EnsureTenantAccess` (Tenant-Isolation über `X-Api-Key`) und `LogApiUsage` als **terminable** Middleware (`terminate()` läuft nach dem Response). Registriere die Aliase in `bootstrap/app.php`.
 → `app/Http/Middleware/*`, `bootstrap/app.php`

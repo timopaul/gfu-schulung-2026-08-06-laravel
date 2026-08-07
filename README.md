@@ -198,50 +198,23 @@ POST /api/v1/orders
 
 Jede Übung nennt die relevanten Dateien. Empfehlung: pro Block einen eigenen Git-Branch (`git switch -c block-1`).
 
-### Tag 1
+### Tag 1 – Praxis-Übungen im Browser (`/uebung/1–4`)
 
-**Block 1 – Typsichere DTOs.**
-Ausgangslage: ein Controller, der mit `$request->all()` arbeitet. Ziel: `CreateOrderData::fromRequest($request)` mit `readonly`-Properties (PHP 8.2). Trenne Validierung (`CreateOrderRequest`) sauber von der Domain (`CreateOrderData`). Ergänze die Gutschein-Prüfung in `withValidator()`.
-→ `app/Data/*`, `app/Http/Requests/CreateOrderRequest.php`
+Am ersten Tag hast du vier aufeinander aufbauende Refactoring-Übungen live abgearbeitet. Jede liegt als bewusst „schlechte" Startdatei unter `app/Exercises/` und wird im Browser **live per Reflection geprüft**: refactoren → Seite neu laden → Häkchen werden grün. Server starten mit `php artisan serve`, dann die Tabs oben oder die URLs direkt aufrufen.
 
-*Aufwärmübung „Töte den Parameter-Wust":* In `app/Exercises/CustomerRegistrar.php` liegt eine Methode mit sechs losen Parametern (ein „Data Clump") und ein Aufruf, in dem zwei Argumente vertauscht sind – vom Compiler unbemerkt. Refaktoriere die Signatur auf ein einziges `RegisterCustomerData`-DTO (`final readonly class`) und schreibe den Aufruf mit Named Arguments neu. Der Bug wird damit unmöglich. Verifizieren: `php artisan tinker` → `(new App\Exercises\CustomerRegistrar())->demoAufrufMitBug();`
-→ `app/Exercises/CustomerRegistrar.php`, neu: `app/Data/RegisterCustomerData.php`
+**Übung 1 – Töte den Parameter-Wust (DTO).** `app/Exercises/CustomerRegistrar.php` hat eine Methode mit sechs losen Parametern (ein „Data Clump") und einen Aufruf, in dem zwei Argumente vertauscht sind – vom Compiler unbemerkt. Refaktoriere die Signatur auf ein einziges `RegisterCustomerData`-DTO (`final readonly class`) und schreibe den Aufruf mit Named Arguments neu; der Bug wird damit unmöglich.
+→ `app/Exercises/CustomerRegistrar.php`, neu: `app/Data/RegisterCustomerData.php` · Runner: `/uebung/1` · ohne DB
 
-Diese Übung lässt sich **komplett im Browser** abarbeiten und testen – ganz ohne DB oder Seeding:
+**Übung 2 – Zieh die Rechenlogik in einen Service.** In `app/Exercises/OrderProcessor.php` rechnet `process()` die Bestellsumme selbst aus. Extrahiere sie in `app/Services/PricingService.php` mit `total(array $items, float $discountRate): float` und injiziere den Service per **Konstruktor** (statt `new`). Kontrolle: 9,00 + 3,20, 10 % Rabatt = 10,98.
+→ `app/Exercises/OrderProcessor.php`, neu: `app/Services/PricingService.php` · Runner: `/uebung/2` · ohne DB
 
-```bash
-php artisan serve
-# -> http://localhost:8000/uebung/1   (oder Tab "Übung 1: DTO")
-```
+**Übung 3 – Mach daraus eine Single Action.** In `app/Exercises/OrderFinalizer.php` erledigt `finalize()` mehrere Schritte inline und ungeklammert. Zieh sie in `app/Actions/Orders/FinalizeOrderAction.php` mit `execute(string $email): string`, klammere sie in `DB::transaction()` und häng die Action per **Konstruktor** in den `OrderFinalizer` (der nur noch delegiert). Vorbild: `CreateOrderAction`.
+→ `app/Exercises/OrderFinalizer.php`, neu: `app/Actions/Orders/FinalizeOrderAction.php` · Runner: `/uebung/3` · braucht DB (`php artisan migrate`)
 
-Die Seite prüft deinen Code live per Reflection (DTO vorhanden? final + readonly? richtige Felder/Typen? Signatur umgestellt?) und führt den Beispielaufruf aus, sodass du siehst, ob die Vertauschung behoben ist. Refactoren → Seite neu laden → alle Häkchen grün.
+**Übung 4 – Entkopple die Nebeneffekte über ein Event.** In `app/Exercises/OrderShipper.php` erledigt `ship()` zwei Nebeneffekte selbst und inline: Versandbestätigung (Mail) und Bestandsaktualisierung. Feuere stattdessen `OrderShipped` und verlagere beide in je einen Listener (`SendShippingConfirmation`, `UpdateInventory`), registriert im `EventServiceProvider`. `ship()` dispatcht danach nur noch. Gewinn: einen dritten Listener (z. B. Statistik) hängst du an, ohne `ship()` anzufassen.
+→ `app/Exercises/OrderShipper.php`, neu: `app/Events/OrderShipped.php`, `app/Listeners/SendShippingConfirmation.php`, `app/Listeners/UpdateInventory.php`, Registrierung in `app/Providers/EventServiceProvider.php` · Runner: `/uebung/4` · ohne DB
 
-*Aufwärmübung „Zieh die Rechenlogik in einen Service":* In `app/Exercises/OrderProcessor.php` rechnet `process()` die Bestellsumme selbst aus – reine Fachlogik, die im „Fat Controller" nichts verloren hat. Extrahiere sie in `app/Services/PricingService.php` mit `total(array $items, float $discountRate): float` und lass den Service per **Konstruktor** in den `OrderProcessor` injizieren (statt `new`). Ergebnis: eine pure, testbare Methode und ein Objekt, das der Container automatisch zusammensteckt.
-→ `app/Exercises/OrderProcessor.php`, neu: `app/Services/PricingService.php`
-
-Auch diese Übung läuft **komplett im Browser** (ohne DB/Seeding): `http://localhost:8000/uebung/2` (oder Tab „Übung 2: Service"). Der Runner prüft per Reflection, ob der Service existiert, `total()` korrekt rechnet (9,00 + 3,20, 10 % Rabatt = 10,98) und ob der Service per Konstruktor injiziert wird.
-
-*Aufwärmübung „Mach daraus eine Single Action":* In `app/Exercises/OrderFinalizer.php` erledigt `finalize()` mehrere Schritte inline und ungeklammert – genau ein Use-Case, der atomar laufen sollte. Zieh die Schritte in `app/Actions/Orders/FinalizeOrderAction.php` mit `execute(string $email): string`, klammere sie in `DB::transaction()` und häng die Action per **Konstruktor** in den `OrderFinalizer` (der nur noch delegiert). Vorbild ist `CreateOrderAction` – dieselbe Form, nur kleiner.
-→ `app/Exercises/OrderFinalizer.php`, neu: `app/Actions/Orders/FinalizeOrderAction.php`
-
-Browser-Runner: `http://localhost:8000/uebung/3` (oder Tab „Übung 3: Action"). Prüft, ob die Action existiert, genau **eine** öffentliche Methode `execute(string): string` hat, in `DB::transaction()` klammert und per DI eingehängt ist. Diese Übung nutzt die DB – einmalig `php artisan migrate` ausführen.
-
-*Aufwärmübung „Entkopple die Nebeneffekte über ein Event":* In `app/Exercises/OrderShipper.php` erledigt `ship()` zwei Nebeneffekte selbst und inline – Versandbestätigung (Mail) und Bestandsaktualisierung. Feuere stattdessen ein Event `OrderShipped` und verlagere die zwei Nebeneffekte in je einen Listener (`SendShippingConfirmation`, `UpdateInventory`), registriert im `EventServiceProvider`. `ship()` feuert danach nur noch `OrderShipped::dispatch(...)`. Der Gewinn: einen dritten Listener (z. B. Statistik) hängst du an, ohne `ship()` anzufassen.
-→ `app/Exercises/OrderShipper.php`, neu: `app/Events/OrderShipped.php`, `app/Listeners/SendShippingConfirmation.php`, `app/Listeners/UpdateInventory.php`, Registrierung in `app/Providers/EventServiceProvider.php`
-
-Browser-Runner (ohne DB): `http://localhost:8000/uebung/4` (oder Tab „Übung 4: Event"). Prüft, ob Event und beide Listener existieren, im `EventServiceProvider` registriert sind, `ship()` das Event feuert (via `Event::fake()`) und beide Nebeneffekte tatsächlich laufen.
-
-**Block 2 – Action Classes & Events.**
-Verlagere die Logik aus `OrderController@store` in `CreateOrderAction`. Klammere alles in `DB::transaction()`. Feuere `OrderCreated` statt die Mail direkt zu senden. Der Controller bleibt „lean".
-→ `app/Actions/Orders/CreateOrderAction.php`, `app/Events/OrderCreated.php`, `app/Listeners/SendOrderConfirmation.php`
-
-**Block 3 – Advanced Eloquent.**
-Aktiviere `Model::preventLazyLoading()` im `AppServiceProvider` und behebe die N+1-Fälle im `index()`. Baue den `OrderBuilder` mit lesbaren Scopes (`forTenant`, `paid`, `withItemCount`).
-→ `app/Builders/OrderBuilder.php`, `app/Providers/AppServiceProvider.php`
-
-**Block 4 – Pipeline-Pattern.**
-Zerlege den Checkout in drei Pipes: `CheckStockPipe → ApplyDiscountsPipe → CalculateTaxPipe`. Nutze `Illuminate\Pipeline\Pipeline` in der Action. Der `CheckoutContext` transportiert die Zwischenergebnisse.
-→ `app/Pipelines/Checkout/*`
+Konzeptionell decken die vier Übungen die Tag-1-Blöcke ab: **DTO** (Block 1), **Service-Extraktion**, **Single Action + Transaktion** (Block 2) und **Event/Listener-Entkopplung** (Block 2). Die Referenzlösung im Repo (`CreateOrderAction`, `OrderBuilder`, `Pipelines/Checkout/*`) zeigt dieselben Muster im „echten" Kontext.
 
 ### Tag 2
 

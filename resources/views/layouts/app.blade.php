@@ -83,6 +83,7 @@
             <a href="{{ route('exercises.event') }}" class="{{ request()->routeIs('exercises.event') ? 'active' : '' }}">Übung 4: Event</a>
             <a href="{{ route('exercises.eloquent') }}" class="{{ request()->routeIs('exercises.eloquent') ? 'active' : '' }}">Übung 5: Eloquent</a>
             <a href="{{ route('exercises.pipeline') }}" class="{{ request()->routeIs('exercises.pipeline') ? 'active' : '' }}">Übung 6: Pipeline</a>
+            <a href="{{ route('exercises.resource') }}" class="{{ request()->routeIs('exercises.resource') ? 'active' : '' }}">Übung 7: Resource</a>
         </nav>
 
         @if (session('status'))

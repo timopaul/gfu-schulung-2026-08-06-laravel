@@ -235,6 +235,18 @@ count(DB::getQueryLog());   // vorher: 1 + N,  Ziel: 1
 **Übung 6 – Advanced Pipelines (Mindestbestellwert).** Der Skeleton-Pipe `app/Pipelines/Checkout/MinimumOrderValuePipe.php` lässt aktuell jede Bestellung durch. Erzwinge einen Mindestbestellwert von **5,00 €** (500 Cent) auf `subtotalCents`: lege `app/Exceptions/BelowMinimumOrderException.php` an (erbt `DomainException`, `status = 422`, `title = 'Below Minimum Order'`, Vorbild: `InvalidVoucherException`), lass `handle()` bei Unterschreitung werfen und häng den Pipe in `CreateOrderAction::execute()` in das `through([...])` – **nach** `CheckStockPipe`, weil dort erst `subtotalCents` entsteht. Der globale Exception-Handler macht daraus automatisch RFC-7807-JSON. Kernbotschaft: **die Position im `through([...])` ist die Geschäftslogik.**
 → ändern: `app/Pipelines/Checkout/MinimumOrderValuePipe.php`, `app/Actions/Orders/CreateOrderAction.php` · neu: `app/Exceptions/BelowMinimumOrderException.php` · Runner: `/uebung/6` · ohne DB (Pipe isoliert getestet)
 
+**Übung 7 – API Architecture & Resources (Produkt-Endpoint).** `app/Http/Resources/ProductResource.php` reicht mit `parent::toArray()` aktuell **alle** DB-Spalten roh nach außen – inklusive interner `tenant_id` und Cent-Beträge. Entkopple die Außendarstellung von der DB (Vorbild: `OrderResource`): `price` als Euro-Float (`price_cents / 100`) plus `'currency' => 'EUR'`, `in_stock` als Boolean (`$this->stock > 0`), `stock` nur per `$this->when(...)` bei Vorrat, `tenant_id` und Timestamps weglassen (Data Hiding). Dann in `ProductController::index()` die Produkte des aktuellen Mandanten (`$request->attributes->get('tenant_id')`) laden und `ProductResource::collection(...)` zurückgeben, und die Route `GET products` in die v1-Gruppe von `routes/api.php` ergänzen. Kernbotschaft: **die Resource ist die einzige Stelle, die entscheidet, was der Client sieht.**
+→ ändern: `app/Http/Resources/ProductResource.php`, `app/Http/Controllers/Api/V1/ProductController.php`, `routes/api.php` · Runner: `/uebung/7` · ohne DB (Resource isoliert getestet)
+
+Prüfen per API (nach `php artisan serve`):
+
+```bash
+curl -s http://localhost:8000/api/v1/products \
+  -H "X-Api-Key: key_acme_demo" -H "Accept: application/json" | json_pp
+# Erwartung: nur id, name, sku, price, currency, in_stock (und stock bei Vorrat) –
+# kein tenant_id, keine rohen *_cents.
+```
+
 **Block 5 – Custom Middleware.**
 Implementiere `EnsureTenantAccess` (Tenant-Isolation über `X-Api-Key`) und `LogApiUsage` als **terminable** Middleware (`terminate()` läuft nach dem Response). Registriere die Aliase in `bootstrap/app.php`.
 → `app/Http/Middleware/*`, `bootstrap/app.php`

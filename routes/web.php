@@ -42,3 +42,7 @@ Route::get('uebung/5', [ExerciseWebController::class, 'eloquentQueryOptimization
 
 // Übung 6 (Tag 2) – Advanced Pipelines. Der Pipe wird isoliert getestet (ohne DB).
 Route::get('uebung/6', [ExerciseWebController::class, 'checkoutPipeline'])->name('exercises.pipeline');
+
+// Übung 7 (Tag 2) – API Architecture & Resources. Zwei Produkte laufen isoliert
+// (ohne DB) durch die Resource; der Struktur-Check prüft Route + Controller.
+Route::get('uebung/7', [ExerciseWebController::class, 'productResource'])->name('exercises.resource');

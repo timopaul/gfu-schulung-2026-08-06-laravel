@@ -75,6 +75,10 @@ final class ExerciseWebController
     private const DOMAIN_EXC = 'App\\Exceptions\\DomainException';
     private const CREATE_ACTION = 'App\\Actions\\Orders\\CreateOrderAction';
 
+    /** Ziel-Klassen für Übung 7 (API Architecture & Resources). */
+    private const PRODUCT_RESOURCE = 'App\\Http\\Resources\\ProductResource';
+    private const PRODUCT_CTRL = 'App\\Http\\Controllers\\Api\\V1\\ProductController';
+
     public function dtoRefactoring(): View
     {
         $checks = $this->buildChecks();
@@ -742,6 +746,146 @@ final class ExerciseWebController
             }
 
             return [['throwsBelow' => $throwsBelow, 'passesAbove' => $passesAbove], null];
+        } catch (Throwable $e) {
+            return [null, $e->getMessage()];
+        }
+    }
+
+    /**
+     * Übung 7 – API Architecture & Resources.
+     *
+     * Eine API-Resource entkoppelt die DB-Struktur von der Außendarstellung.
+     * Der Struktur-Check zeigt, DASS Resource/Controller/Route stehen; der
+     * Laufzeit-Check schickt zwei echte Produkte durch die Resource und prüft,
+     * WAS rauskommt: Euro-Float statt Cent, in_stock als Bool, stock nur bei
+     * Vorrat – und dass tenant_id / *_cents / Timestamps NICHT durchsickern.
+     */
+    public function productResource(): View
+    {
+        $checks = $this->buildResourceChecks();
+        [$demo, $demoError] = $this->runResourceDemo();
+
+        $priceOk = $demo !== null && ($demo['priceOk'] ?? false) === true;
+        $inStockOk = $demo !== null && ($demo['inStockBoolOk'] ?? false) === true;
+        $stockCondOk = $demo !== null && ($demo['stockConditionalOk'] ?? false) === true;
+        $noLeakOk = $demo !== null && ($demo['noLeakOk'] ?? false) === true;
+
+        $checks[] = ['label' => 'price als Euro-Float (19,99) + "currency" => "EUR"', 'ok' => $priceOk];
+        $checks[] = ['label' => 'in_stock als Boolean (Vorrat > 0 → true, 0 → false)', 'ok' => $inStockOk];
+        $checks[] = ['label' => 'stock nur bei Vorrat (bedingtes Feld via $this->when(...))', 'ok' => $stockCondOk];
+        $checks[] = ['label' => 'Kein tenant_id, keine rohen *_cents, keine Timestamps (Data Hiding)', 'ok' => $noLeakOk];
+
+        $allPassed = collect($checks)->every(fn (array $c): bool => $c['ok'] === true);
+
+        return view('exercises.resource', [
+            'checks' => $checks,
+            'demo' => $demo,
+            'demoError' => $demoError,
+            'allPassed' => $allPassed,
+        ]);
+    }
+
+    /** @return array<int, array{label: string, ok: bool}> */
+    private function buildResourceChecks(): array
+    {
+        $checks = [];
+
+        $resourceExists = class_exists(self::PRODUCT_RESOURCE);
+        $checks[] = ['label' => 'Resource "app/Http/Resources/ProductResource.php" existiert', 'ok' => $resourceExists];
+
+        $ctrlExists = class_exists(self::PRODUCT_CTRL);
+        $checks[] = ['label' => 'Controller "app/Http/Controllers/Api/V1/ProductController.php" existiert', 'ok' => $ctrlExists];
+
+        // Route GET /api/v1/products muss in der v1-Gruppe registriert sein.
+        $routeOk = false;
+        foreach (app('router')->getRoutes() as $route) {
+            if ($route->uri() === 'api/v1/products' && in_array('GET', $route->methods(), true)) {
+                $routeOk = true;
+                break;
+            }
+        }
+        $checks[] = ['label' => 'Route GET /api/v1/products registriert (routes/api.php, v1-Gruppe)', 'ok' => $routeOk];
+
+        // Controller lädt die Produkte des aktuellen Mandanten und gibt eine
+        // ProductResource-Collection zurück (Quelltext-Check von index()).
+        $scopesTenant = false;
+        $returnsCollection = false;
+        if ($ctrlExists && method_exists(self::PRODUCT_CTRL, 'index')) {
+            $src = $this->methodSource(new ReflectionMethod(self::PRODUCT_CTRL, 'index'));
+            $scopesTenant = str_contains($src, 'tenant_id');
+            $returnsCollection = str_contains($src, 'ProductResource::collection');
+        }
+        $checks[] = ['label' => 'index() filtert auf den aktuellen Mandanten (tenant_id)', 'ok' => $scopesTenant];
+        $checks[] = ['label' => 'index() gibt ProductResource::collection(...) zurück', 'ok' => $returnsCollection];
+
+        return $checks;
+    }
+
+    /**
+     * Schickt zwei echte (nicht gespeicherte) Produkte durch die Resource und
+     * prüft die geformte Ausgabe. resolve() filtert bedingte Felder ($this->when)
+     * korrekt heraus – so wird sichtbar, ob "stock" bei 0 wirklich verschwindet.
+     *
+     * @return array{0: ?array<string, mixed>, 1: ?string}
+     */
+    private function runResourceDemo(): array
+    {
+        if (! class_exists(self::PRODUCT_RESOURCE)) {
+            return [null, null];
+        }
+
+        try {
+            $class = self::PRODUCT_RESOURCE;
+
+            $inStock = new Product([
+                'tenant_id' => 7,
+                'name' => 'Beispiel-Artikel',
+                'sku' => 'SKU-INSTOCK',
+                'price_cents' => 1999,
+                'stock' => 5,
+            ]);
+            $inStock->id = 101;
+
+            $outOfStock = new Product([
+                'tenant_id' => 7,
+                'name' => 'Ausverkauft',
+                'sku' => 'SKU-EMPTY',
+                'price_cents' => 500,
+                'stock' => 0,
+            ]);
+            $outOfStock->id = 102;
+
+            $high = (new $class($inStock))->resolve(request());
+            $low = (new $class($outOfStock))->resolve(request());
+
+            $priceOk = array_key_exists('price', $high)
+                && is_numeric($high['price']) && abs((float) $high['price'] - 19.99) < 0.001
+                && ($high['currency'] ?? null) === 'EUR';
+
+            $inStockBoolOk = ($high['in_stock'] ?? null) === true
+                && ($low['in_stock'] ?? null) === false;
+
+            $stockConditionalOk = array_key_exists('stock', $high)
+                && (int) $high['stock'] === 5
+                && ! array_key_exists('stock', $low);
+
+            $leakKeys = ['tenant_id', 'price_cents', 'created_at', 'updated_at'];
+            $noLeakOk = true;
+            foreach ($leakKeys as $key) {
+                if (array_key_exists($key, $high) || array_key_exists($key, $low)) {
+                    $noLeakOk = false;
+                    break;
+                }
+            }
+
+            return [[
+                'high' => $high,
+                'low' => $low,
+                'priceOk' => $priceOk,
+                'inStockBoolOk' => $inStockBoolOk,
+                'stockConditionalOk' => $stockConditionalOk,
+                'noLeakOk' => $noLeakOk,
+            ], null];
         } catch (Throwable $e) {
             return [null, $e->getMessage()];
         }

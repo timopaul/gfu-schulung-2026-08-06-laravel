@@ -216,7 +216,21 @@ Am ersten Tag hast du vier aufeinander aufbauende Refactoring-Übungen live abge
 
 Konzeptionell decken die vier Übungen die Tag-1-Blöcke ab: **DTO** (Block 1), **Service-Extraktion**, **Single Action + Transaktion** (Block 2) und **Event/Listener-Entkopplung** (Block 2). Die Referenzlösung im Repo (`CreateOrderAction`, `OrderBuilder`, `Pipelines/Checkout/*`) zeigt dieselben Muster im „echten" Kontext.
 
-### Tag 2
+### Tag 2 – Praxis-Übungen
+
+**Übung 5 – Lazy Loading & N+1 (Advanced Eloquent).** `app/Exercises/OrderReport.php` baut einen Paid-Umsatz-Report, aber teuer: `Order::all()` lädt alle Mandanten, Mandant und Status werden **in PHP** gefiltert, und `$order->items()->count()` feuert **pro Zeile** eine eigene Query (N+1). Bau `summarize()` so um, dass es mit **einer** Query auskommt: die vorhandenen Builder-Scopes nutzen (`->forTenant($id)->paid()`), die Item-Anzahl per Count-Subquery holen (`->withItemCount()` → `$order->items_count`). Bonus: `Model::preventLazyLoading()` im `AppServiceProvider` aktivieren, damit versehentliches Lazy Loading sofort auffällt.
+→ ändern: `app/Exercises/OrderReport.php` · Vorbild-Scopes: `app/Builders/OrderBuilder.php`
+
+Verifizieren im `tinker` (geseedete DB vorausgesetzt):
+
+```bash
+php artisan tinker
+```
+```php
+DB::enableQueryLog();
+app(App\Exercises\OrderReport::class)->summarize(1);
+count(DB::getQueryLog());   // vorher: 1 + N,  Ziel: 1
+```
 
 **Block 5 – Custom Middleware.**
 Implementiere `EnsureTenantAccess` (Tenant-Isolation über `X-Api-Key`) und `LogApiUsage` als **terminable** Middleware (`terminate()` läuft nach dem Response). Registriere die Aliase in `bootstrap/app.php`.

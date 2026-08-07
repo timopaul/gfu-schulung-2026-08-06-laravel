@@ -8,6 +8,11 @@ use App\Exercises\CustomerRegistrar;
 use App\Exercises\OrderFinalizer;
 use App\Exercises\OrderProcessor;
 use App\Exercises\OrderShipper;
+use App\Models\Order;
+use App\Models\OrderItem;
+use App\Models\Product;
+use App\Models\Tenant;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\View\View;
 use ReflectionClass;
@@ -58,6 +63,9 @@ final class ExerciseWebController
     private const EVENT = 'App\\Events\\OrderShipped';
     private const LISTENER_MAIL = 'App\\Listeners\\SendShippingConfirmation';
     private const LISTENER_STOCK = 'App\\Listeners\\UpdateInventory';
+
+    /** Ziel-Klasse für Übung 5 (Advanced Eloquent / N+1). */
+    private const REPORT = 'App\\Exercises\\OrderReport';
 
     public function dtoRefactoring(): View
     {
@@ -467,6 +475,152 @@ final class ExerciseWebController
             'mail' => str_contains($joined, '[Übung] Versandbestätigung'),
             'stock' => str_contains($joined, '[Übung] Bestand aktualisiert'),
         ], null];
+    }
+
+    /**
+     * Übung 5 – Advanced Eloquent & Query-Optimierung.
+     *
+     * Zwei Ebenen: der Quelltext-Check zeigt WIE (Builder-Scopes statt PHP-Filter,
+     * Count-Subquery statt items()->count()), der Laufzeit-Check zeigt WAS es bringt
+     * (genau eine Query statt 1+N). Refactoren -> neu laden -> grün werden.
+     */
+    public function eloquentQueryOptimization(): View
+    {
+        $checks = $this->buildEloquentChecks();
+        [$demo, $demoError] = $this->runReportDemo();
+
+        $queryOk = $demo !== null && ($demo['queries'] ?? null) === 1;
+        $resultOk = $demo !== null && ($demo['resultOk'] ?? false) === true;
+
+        $checks[] = ['label' => 'summarize() braucht genau EINE Query (kein N+1)', 'ok' => $queryOk];
+        $checks[] = ['label' => 'summarize() liefert weiterhin das korrekte Ergebnis', 'ok' => $resultOk];
+
+        $allPassed = collect($checks)->every(fn (array $c): bool => $c['ok'] === true);
+
+        return view('exercises.eloquent', [
+            'checks' => $checks,
+            'demo' => $demo,
+            'demoError' => $demoError,
+            'allPassed' => $allPassed,
+        ]);
+    }
+
+    /** @return array<int, array{label: string, ok: bool}> */
+    private function buildEloquentChecks(): array
+    {
+        $checks = [];
+
+        $exists = class_exists(self::REPORT);
+        $checks[] = ['label' => 'Klasse "app/Exercises/OrderReport.php" existiert', 'ok' => $exists];
+
+        $src = '';
+        if ($exists && method_exists(self::REPORT, 'summarize')) {
+            $src = $this->methodSource(new ReflectionMethod(self::REPORT, 'summarize'));
+        }
+
+        $noAll = $src !== '' && ! str_contains($src, 'Order::all(');
+        $noPerRowCount = $src !== '' && preg_match('/->\s*items\s*\(\s*\)\s*->\s*count\s*\(/', $src) === 0;
+        $usesTenantScope = str_contains($src, 'forTenant(');
+        $usesCountSubquery = str_contains($src, 'withItemCount(') || str_contains($src, 'withCount(');
+        $usesItemsCount = str_contains($src, 'items_count');
+
+        $checks[] = ['label' => 'Kein Order::all() mehr (nicht alle Mandanten laden)', 'ok' => $noAll];
+        $checks[] = ['label' => 'Kein $order->items()->count() pro Zeile (das ist das N+1)', 'ok' => $noPerRowCount];
+        $checks[] = ['label' => 'Filtert im SQL per Builder-Scope ->forTenant(...)->paid()', 'ok' => $usesTenantScope];
+        $checks[] = ['label' => 'Zählt per Count-Subquery ->withItemCount() / ->withCount()', 'ok' => $usesCountSubquery];
+        $checks[] = ['label' => 'Liest die berechnete Spalte $order->items_count', 'ok' => $usesItemsCount];
+
+        return $checks;
+    }
+
+    /**
+     * Misst den Ist-Zustand von summarize() an echten Daten.
+     *
+     * Da kein Seeding Bestellungen anlegt, baut der Runner Testdaten in einer
+     * Transaktion auf, zählt die Queries während summarize() und rollt danach
+     * alles zurück – die DB bleibt unverändert. So wird der N+1 sichtbar:
+     * unoptimiert 1 (Order::all) + N (items()->count()), optimiert genau 1.
+     *
+     * @return array{0: ?array<string, mixed>, 1: ?string}
+     */
+    private function runReportDemo(): array
+    {
+        if (! class_exists(self::REPORT)) {
+            return [null, null];
+        }
+
+        try {
+            DB::beginTransaction();
+
+            $tenant = Tenant::create(['name' => 'Grader GmbH', 'api_key' => 'key_grader_'.uniqid()]);
+            $other = Tenant::create(['name' => 'Andere GmbH', 'api_key' => 'key_other_'.uniqid()]);
+            $product = Product::create([
+                'tenant_id' => $tenant->id,
+                'name' => 'Grader-Artikel',
+                'sku' => 'SKU-GR-'.uniqid(),
+                'price_cents' => 1000,
+                'stock' => 100,
+            ]);
+
+            // Zwei bezahlte Bestellungen (2 bzw. 3 Positionen) => erwartete items_count.
+            $this->makeGraderOrder($tenant->id, $product->id, 'paid', 2);
+            $this->makeGraderOrder($tenant->id, $product->id, 'paid', 3);
+            // Rauschen: darf NICHT im Report auftauchen (falscher Status / falscher Mandant).
+            $this->makeGraderOrder($tenant->id, $product->id, 'pending', 1);
+            $this->makeGraderOrder($other->id, $product->id, 'paid', 4);
+
+            DB::flushQueryLog();
+            DB::enableQueryLog();
+            $rows = app(self::REPORT)->summarize($tenant->id);
+            $queries = count(DB::getQueryLog());
+            DB::disableQueryLog();
+
+            $counts = collect(is_array($rows) ? $rows : [])
+                ->map(fn ($r): int => (int) ($r['items'] ?? 0))
+                ->sort()->values()->all();
+
+            $resultOk = is_array($rows)
+                && count($rows) === 2
+                && $counts === [2, 3];
+
+            DB::rollBack();
+
+            return [[
+                'queries' => $queries,
+                'rows' => is_array($rows) ? count($rows) : 0,
+                'counts' => $counts,
+                'resultOk' => $resultOk,
+            ], null];
+        } catch (Throwable $e) {
+            try {
+                DB::rollBack();
+            } catch (Throwable) {
+                // Falls keine Transaktion offen ist – ignorieren.
+            }
+
+            return [null, $e->getMessage()];
+        }
+    }
+
+    /** Legt eine Bestellung mit $itemCount Positionen an (nur für den Grader). */
+    private function makeGraderOrder(int $tenantId, int $productId, string $status, int $itemCount): void
+    {
+        $order = Order::create([
+            'tenant_id' => $tenantId,
+            'customer_email' => 'grader@example.test',
+            'status' => $status,
+            'subtotal_cents' => 1000 * $itemCount,
+            'total_cents' => 1000 * $itemCount,
+        ]);
+
+        for ($i = 0; $i < $itemCount; $i++) {
+            OrderItem::create([
+                'order_id' => $order->id,
+                'product_id' => $productId,
+                'quantity' => 1,
+                'unit_price_cents' => 1000,
+            ]);
+        }
     }
 
     /** @return array<int, array{label: string, ok: bool}> */

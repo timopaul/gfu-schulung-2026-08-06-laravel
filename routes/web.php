@@ -35,3 +35,7 @@ Route::get('uebung/1', [ExerciseWebController::class, 'dtoRefactoring'])->name('
 Route::get('uebung/2', [ExerciseWebController::class, 'serviceExtraction'])->name('exercises.service');
 Route::get('uebung/3', [ExerciseWebController::class, 'actionExtraction'])->name('exercises.action');
 Route::get('uebung/4', [ExerciseWebController::class, 'eventDispatch'])->name('exercises.event');
+
+// Übung 5 (Tag 2) braucht die DB: der Runner misst den Query-Count an temporären
+// Testdaten und rollt sie danach zurück. Vorher einmal 'php artisan migrate'.
+Route::get('uebung/5', [ExerciseWebController::class, 'eloquentQueryOptimization'])->name('exercises.eloquent');
